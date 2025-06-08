@@ -1,0 +1,601 @@
+-- vga_top.vhd
+
+-- Descripci n que visualiza franjas de colores en un monitor VGA
+--
+-- Basado en ejemplo de Hamblen, J.O., Hall T.S., Furman, M.D.:
+-- Rapid Prototyping of Digital Systems : SOPC Edition, Springer 2008.
+-- (Cap tulo 10) 
+
+
+LIBRARY IEEE;
+USE  IEEE.STD_LOGIC_1164.all;
+USE IEEE.STD_LOGIC_ARITH.all;
+USE  IEEE.STD_LOGIC_UNSIGNED.all;
+
+LIBRARY lpm;
+USE lpm.lpm_components.ALL;
+
+
+ENTITY vga_top IS
+
+PORT(	
+      CLOCK_50			     : IN STD_LOGIC;
+		VGA_R		: OUT STD_LOGIC_vector(0 to 7);
+		VGA_G		: OUT STD_LOGIC_vector(0 to 7);
+		VGA_B		: OUT STD_LOGIC_vector(0 to 7);
+		VGA_BLANK_N		: OUT STD_LOGIC;
+		VGA_HS		: OUT STD_LOGIC;
+		Pala1_UP : IN STD_LOGIC;
+		Pala1_DOWN : IN STD_LOGIC;
+		Pala2_UP : IN STD_LOGIC;
+		Pala2_DOWN : IN STD_LOGIC;
+		VGA_VS		: OUT STD_LOGIC;
+		DISPLAY_P1 : OUT STD_LOGIC_vector(0 to 6);
+		DISPLAY_P2	 : OUT STD_LOGIC_vector(0 to 6);
+		VGA_CLK		: OUT STD_LOGIC
+		);
+
+END vga_top;
+
+ARCHITECTURE funcional OF vga_top IS
+
+
+	COMPONENT vga_PLL
+		PORT(
+			inclk0		: IN STD_LOGIC  := '0';
+			c0		: OUT STD_LOGIC );
+	END COMPONENT;
+	
+	COMPONENT controlador_vga_640_x_480_60
+		PORT(	
+			clock_25		: 	IN	STD_LOGIC;
+			R,G,B       : 	     IN	     STD_LOGIC;
+			VGA_R, VGA_G, VGA_B		:	OUT	STD_LOGIC;
+			vga_blank_N	:	OUT	STD_LOGIC;
+			vga_hs		:	OUT     STD_LOGIC;
+			vga_vs		:	OUT     STD_LOGIC;
+			vga_clk		:	OUT     STD_LOGIC;
+			pixel_y		:	OUT     STD_LOGIC_VECTOR(9 DOWNTO 0);
+			pixel_x		:	OUT	STD_LOGIC_VECTOR(9 DOWNTO 0));		
+	END COMPONENT;
+	
+	COMPONENT bola 
+		PORT(
+			Red,Green,Blue : OUT std_logic;
+			vs : IN std_logic;
+			Pala1_UP : IN STD_LOGIC;
+			Pala1_DOWN : IN STD_LOGIC;
+			Pala2_UP : IN STD_LOGIC;
+			Pala2_DOWN : IN STD_LOGIC;
+			pixel_Y, pixel_X : IN std_logic_vector(9 downto 0);
+			puntos_p1_vec : OUT std_logic_vector(3 downto 0);
+			puntos_p2_vec : OUT std_logic_vector(3 downto 0)
+		);
+	END COMPONENT;	
+	
+	COMPONENT dec_7seg
+		PORT(
+			hex_digit	: IN  STD_LOGIC_VECTOR(3 DOWNTO 0);
+			seg_digit	: OUT STD_LOGIC_VECTOR(0 TO 6)
+		);
+	END COMPONENT;
+
+
+--Puntuacion 
+signal puntos_p1_vec : std_logic_vector(3 downto 0);
+signal puntos_p2_vec : std_logic_vector(3 downto 0);
+signal seg_p1 : std_logic_vector(0 to 6);
+signal seg_p2 : std_logic_vector(0 to 6);
+
+-------------------------------------------------------------------------	
+SIGNAL clock_25 : STD_LOGIC;
+SIGNAL R_Data, G_Data, B_Data : STD_LOGIC;
+SIGNAL pixel_x, pixel_y	: STD_LOGIC_VECTOR(9 DOWNTO 0);
+SIGNAL vs : STD_LOGIC;
+
+
+
+BEGIN
+
+vga_vs <= vs;
+
+--R_data  <= pixel_X(9);
+--G_data  <= pixel_x(8);
+--B_data  <= pixel_x(7);
+
+	-- PLL para generar el reloj de 25 MHz
+PLL: vga_pll PORT MAP (
+		inclk0 => clock_50,
+		c0 => clock_25);
+		
+
+	-- Controlador de la VGA
+VGA:  controlador_vga_640_x_480_60 PORT MAP (	
+		clock_25	=> clock_25,
+		R => R_data,
+		G => G_data,
+		B => B_data,	
+		vga_r	=> vga_R(7),
+		vga_g => vga_g(7),
+		vga_b => vga_b(7),
+		vga_blank_n => vga_blank_n,
+		vga_hs => vga_hs, 
+		vga_vs => vs, 
+		vga_clk	=> vga_clk,
+		pixel_y => pixel_y, 
+		pixel_x => pixel_x);		
+
+BALL: bola PORT MAP (
+	vs => vs,
+	pixel_Y => pixel_y,
+	pixel_X => pixel_x,
+	Pala1_UP => Pala1_UP,
+	Pala2_UP => Pala2_UP,
+	Pala1_DOWN => Pala1_DOWN,
+	Pala2_DOWN => Pala2_DOWN,
+	Red => R_data,
+	green => G_data,
+	blue => B_data,
+	puntos_p1_vec => puntos_p1_vec,
+	puntos_p2_vec => puntos_p2_vec
+
+);			
+
+p1_disp : dec_7seg port map(
+    hex_digit => puntos_p1_vec,
+    seg_digit => seg_p1
+);
+
+p2_disp : dec_7seg port map(
+    hex_digit => puntos_p2_vec,
+    seg_digit => seg_p2
+);	
+
+DISPLAY_P1 <= seg_p1;
+DISPLAY_P2 <= seg_p2;	 	
+
+END funcional;
+
+-- ball.vhd
+
+
+-- Descripci n de una bola cuadrada que se mueve hacia arriba y hacia abajo, 
+-- respetando los m rgenes superior e inferior de la pantalla.
+--
+-- Basado en ejemplo de Hamblen, J.O., Hall T.S., Furman, M.D.:
+-- Rapid Prototyping of Digital Systems : SOPC Edition, Springer 2008.
+-- (Cap tulo 10) 
+
+
+LIBRARY IEEE;
+USE IEEE.STD_LOGIC_1164.all;
+USE IEEE.STD_LOGIC_ARITH.all;
+USE IEEE.STD_LOGIC_UNSIGNED.all;
+LIBRARY lpm;
+USE lpm.lpm_components.ALL;
+
+ENTITY bola IS
+	PORT(
+		Red,Green,Blue : OUT std_logic;
+	    vs : IN std_logic;
+		 Pala1_UP : IN STD_LOGIC;
+			Pala1_DOWN : IN STD_LOGIC;
+			Pala2_UP : IN STD_LOGIC;
+			Pala2_DOWN : IN STD_LOGIC;
+		pixel_Y, pixel_X : IN std_logic_vector(9 downto 0);
+		puntos_p1_vec : OUT std_logic_vector(3 downto 0);
+		puntos_p2_vec : OUT std_logic_vector(3 downto 0)
+		);
+END bola;
+
+architecture funcional of bola is
+	SIGNAL Bola_on : std_logic;
+	SIGNAL Pala_on1 : std_logic;
+	SIGNAL red_on : std_logic;
+	SIGNAL Pala_on2 : std_logic; --Segunda pala
+	SIGNAL Desplaza_Bola_Y: STD_LOGIC_VECTOR(9 DOWNTO 0);
+	SIGNAL Desplaza_Bola_X: STD_LOGIC_VECTOR(9 DOWNTO 0);
+	SIGNAL Desplaza_Pala1_Y: STD_LOGIC_VECTOR(9 DOWNTO 0);
+	SIGNAL Desplaza_Pala2_Y: STD_LOGIC_VECTOR(9 DOWNTO 0);
+	SIGNAL Bola_Y  : std_logic_vector(9 DOWNTO 0);
+	SIGNAL Bola_X  : std_logic_vector(9 DOWNTO 0);
+	SIGNAL Pala1_Y  : std_logic_vector(9 DOWNTO 0) := CONV_STD_LOGIC_VECTOR(270,10);
+	SIGNAL Pala2_Y  : std_logic_vector(9 DOWNTO 0) := CONV_STD_LOGIC_VECTOR(270,10); --Segunda pala
+	
+	signal puntos_p1 : INTEGER := 0;
+	signal puntos_p2 : INTEGER := 0;
+	
+	signal P1 : std_logic := '0';
+	signal P2 : std_logic := '0';
+	
+	constant RESET_X : std_logic_vector(9 downto 0) := CONV_STD_LOGIC_VECTOR(320,10);
+	constant RESET_Y : std_logic_vector(9 downto 0) := CONV_STD_LOGIC_VECTOR(240,10);
+		
+	CONSTANT Size: std_logic_vector(9 DOWNTO 0):= CONV_STD_LOGIC_VECTOR(8,10);
+	CONSTANT Size_red_x: std_logic_vector(9 DOWNTO 0):= CONV_STD_LOGIC_VECTOR(3,10);
+	CONSTANT Size_red_y: std_logic_vector(9 DOWNTO 0):= CONV_STD_LOGIC_VECTOR(256,10);
+	CONSTANT Size_Y: std_logic_vector(9 DOWNTO 0):= CONV_STD_LOGIC_VECTOR(64,10);
+	CONSTANT Size_X: std_logic_vector(9 DOWNTO 0):= CONV_STD_LOGIC_VECTOR(8,10);
+	-- CONSTANT Bola_X : STD_LOGIC_VECTOR(9 DOWNTO 0):= CONV_STD_LOGIC_VECTOR(320,10);
+	
+	-- La red que no se si está bien colocada pero pintar se pinta seguro
+	CONSTANT red_X  : std_logic_vector(9 DOWNTO 0) := CONV_STD_LOGIC_VECTOR(330,10);
+	SIGNAL red_y  : std_logic_vector(9 DOWNTO 0) := CONV_STD_LOGIC_VECTOR(256,10);
+	
+	CONSTANT Pala1_X  : std_logic_vector(9 DOWNTO 0) := CONV_STD_LOGIC_VECTOR(631,10);
+	constant Pala2_X  : std_logic_vector(9 DOWNTO 0) := CONV_STD_LOGIC_VECTOR(8,10); --Segunda pala
+
+	
+BEGIN
+
+Red		<=   Pala_on2 or red_on;
+Green	<=  Pala_on1 or red_on;
+Blue	<= Bola_on or Pala_on1 or Pala_on2 or red_on;
+
+Dibujar_Bola: Process (Bola_Y, pixel_X, pixel_Y)
+BEGIN
+	-- Chequear coordenadas X e Y para identificar el area de la bola
+	-- Poner Bola_on a '1' para visualizar la bola
+	 IF (Bola_X <= pixel_X + Size) AND
+		(Bola_X + Size >= pixel_X) AND
+		(Bola_Y <= pixel_Y + Size) AND
+		(Bola_Y + Size >= pixel_Y ) THEN
+		
+		Bola_on <= '1';
+	ELSE
+		Bola_on <= '0';
+	END IF;
+	
+	
+	
+END process Dibujar_Bola;
+
+Dibujar_Red: Process (red_y, pixel_X, pixel_Y)
+BEGIN
+	-- Chequear coordenadas X e Y para identificar el area de la bola
+	-- Poner Bola_on a '1' para visualizar la bola
+	IF (red_X <= pixel_X + Size_red_x) AND
+		(red_X + Size_red_x >= pixel_X) AND
+		(red_y <= pixel_Y + Size_red_y) AND
+		(red_y + Size_red_y >= pixel_Y ) THEN
+		
+		red_on <= '1';
+	ELSE
+		red_on <= '0';
+	END IF;
+	
+	
+	
+END process Dibujar_Red;
+
+
+Dibujar_Pala1: Process (Pala1_Y, pixel_X, pixel_Y)
+BEGIN
+	-- Chequear coordenadas X e Y para identificar el area de la bola
+	-- Poner Bola_on a '1' para visualizar la bola
+	IF (Pala1_X <= pixel_X + Size_X) AND
+		(Pala1_X + Size_X >= pixel_X) AND
+		(Pala1_Y <= pixel_Y + Size_Y) AND
+		(Pala1_Y + Size_Y >= pixel_Y ) THEN
+		
+		Pala_on1 <= '1';
+	ELSE
+		Pala_on1 <= '0';
+	END IF;
+	
+	
+	
+END process Dibujar_Pala1;
+
+Dibujar_Pala2: Process (Pala2_Y, pixel_X, pixel_Y)
+BEGIN
+	-- Chequear coordenadas X e Y para identificar el area de la bola
+	-- Poner Bola_on a '1' para visualizar la bola
+	IF (Pala2_X <= pixel_X + Size_X) AND
+		(Pala2_X + Size_X >= pixel_X) AND
+		(Pala2_Y <= pixel_Y + Size_Y) AND
+		(Pala2_Y + Size_Y >= pixel_Y ) THEN
+		
+		Pala_on2 <= '1';
+	ELSE
+		Pala_on2 <= '0';
+	END IF;
+	
+	
+	
+END process Dibujar_Pala2;
+
+
+
+Mover_Bola: PROCESS (vs)
+BEGIN
+	-- Actualizar la posici n de la bola en cada refresco de pantalla
+	IF vs'event and vs = '1' THEN
+		-- Detectar los bordes superior e inferior de la pantalla
+		
+		-- Para la actualizacion para lo del reset tengo que cambiar los ods primeros conditions del if de la X
+		
+			IF Bola_Y  >= CONV_STD_LOGIC_VECTOR(479,10) - Size THEN
+				Desplaza_Bola_Y <= CONV_STD_LOGIC_VECTOR(-2,10);
+			ELSIF  Bola_Y <= Size  THEN
+				Desplaza_Bola_Y <= CONV_STD_LOGIC_VECTOR(2,10);
+			END IF;
+			-- Calcular la siguiente posicion de la bola
+			Bola_Y 	  	<= Bola_Y + Desplaza_Bola_Y;
+			
+			-- Aqui para poner la bola para que se mueva en el X tambien 
+			
+			IF Bola_X  >= CONV_STD_LOGIC_VECTOR(639,10) - Size THEN
+				
+				 --Desplaza_Bola_X <= CONV_STD_LOGIC_VECTOR(-2,10);
+				-- Aqui lo nuevo para el reset
+				P2 <= '1';
+				
+			ELSIF (Bola_Y - Size <= Pala1_Y + Size_Y - Size_X) and (Bola_Y + Size >= Pala1_Y - Size_Y - Size_X) and (Bola_X + Size >= Pala1_X - Size_X) THEN	
+				Desplaza_Bola_X <= CONV_STD_LOGIC_VECTOR(-2,10);
+			
+			ELSIF (Bola_Y + Size >= Pala2_Y - Size_Y + Size_X) and (Bola_Y - Size <= Pala2_Y + Size_Y + Size_X) and (Bola_X - Size <= Pala2_X + Size_X) THEN	
+				Desplaza_Bola_X <= CONV_STD_LOGIC_VECTOR(2,10);
+			
+			ELSIF  Bola_X <= Size  THEN
+				-- Desplaza_Bola_X <= CONV_STD_LOGIC_VECTOR(2,10);	
+				-- Aqui lo nuevo para el reset
+				P1 <= '1';
+			
+			END IF;
+			-- Calcular la siguiente posicion de la bola
+			Bola_X 	  	<= Bola_X + Desplaza_Bola_X;
+			
+			if (P1 = '1') then
+				puntos_p1 <= puntos_p1 +1;
+				Bola_X <= RESET_x;
+				Bola_Y <= RESET_Y;
+				Desplaza_Bola_X <= CONV_STD_LOGIC_VECTOR(2,10);
+				Desplaza_Bola_Y <= CONV_STD_LOGIC_VECTOR(2,10);
+				P1 <= '0';
+			elsif (P2 = '1') then
+				puntos_p2 <= puntos_p2 +1;
+				Bola_X <= RESET_x;
+				Bola_Y <= RESET_Y;
+				Desplaza_Bola_X <= CONV_STD_LOGIC_VECTOR(-2,10);
+				Desplaza_Bola_Y <= CONV_STD_LOGIC_VECTOR(2,10);
+				P2 <= '0';
+			
+			end if;
+			
+			puntos_p1_vec <= conv_std_logic_vector(puntos_p1, 4);
+			puntos_p2_vec <= conv_std_logic_vector(puntos_p2, 4);
+			
+			
+			
+			
+			
+	END IF;
+END process Mover_Bola;
+
+
+Mover_Pala1: PROCESS (vs)
+BEGIN
+	if vs'event and vs = '1' then
+		if Pala1_UP = '0' and Pala1_Y > Size_Y then
+				
+				Desplaza_Pala1_Y <= CONV_STD_LOGIC_VECTOR(-2,10);
+		
+		elsif Pala1_DOWN = '0' and Pala1_Y < CONV_STD_LOGIC_VECTOR(479,10) - Size_Y then
+				
+				Desplaza_Pala1_Y <= CONV_STD_LOGIC_VECTOR(2,10);
+		else
+				Desplaza_Pala1_Y <= CONV_STD_LOGIC_VECTOR(0,10);
+		end if;
+		
+		Pala1_Y <= Pala1_Y + Desplaza_Pala1_Y;
+	
+	end if;
+
+END PROCESS Mover_Pala1;
+
+Mover_Pala2: PROCESS (vs)
+BEGIN
+	if vs'event and vs = '1' then
+		if Pala2_UP = '0' and Pala2_Y > Size_Y then
+				
+				Desplaza_Pala2_Y <= CONV_STD_LOGIC_VECTOR(-2,10);
+		
+		elsif Pala2_DOWN = '0' and Pala2_Y < CONV_STD_LOGIC_VECTOR(479,10) - Size_Y then
+				
+				Desplaza_Pala2_Y <= CONV_STD_LOGIC_VECTOR(2,10);
+		else
+				Desplaza_Pala2_Y <= CONV_STD_LOGIC_VECTOR(0,10);
+		end if;
+		
+		Pala2_Y <= Pala2_Y + Desplaza_Pala2_Y;
+	
+	end if;
+
+END PROCESS Mover_Pala2;
+
+
+END funcional;
+
+--7Segmentos.vhd
+LIBRARY IEEE;
+USE IEEE.STD_LOGIC_1164.all;
+USE  IEEE.STD_LOGIC_ARITH.all;
+USE  IEEE.STD_LOGIC_UNSIGNED.all;
+
+-- Conversor de hexadecimal a codigo de 7 segmentos
+-- Los LEDs se iluminan en baja
+
+ENTITY dec_7seg IS
+	
+	PORT(hex_digit		: IN	STD_LOGIC_VECTOR(3 DOWNTO 0);
+		 seg_digit		: OUT STD_LOGIC_VECTOR(0 TO 6));
+
+END dec_7seg;
+
+ARCHITECTURE a OF dec_7seg IS
+	
+BEGIN
+	PROCESS  (Hex_digit)
+		
+	BEGIN
+		
+	  CASE Hex_digit IS
+         WHEN "0000" =>
+             seg_digit <= "0000001";
+         WHEN "0001" =>
+             seg_digit <= "1001111";
+         WHEN "0010" =>
+             seg_digit <= "0010010";
+         WHEN "0011" =>
+             seg_digit <= "0000110";
+         WHEN "0100" =>
+             seg_digit <= "1001100";
+       	 WHEN "0101" =>
+             seg_digit <= "0100100";
+       	 WHEN "0110" =>
+             seg_digit <= "0100000";
+    	 WHEN "0111" =>
+             seg_digit <= "0001111";
+ 	     WHEN "1000" =>
+             seg_digit <= "0000000";
+     	 WHEN "1001" =>
+             seg_digit <= "0000100"; 
+         WHEN "1010" =>
+             seg_digit <= "0001000";
+       	 WHEN "1011" =>
+             seg_digit <= "1100000"; 
+       	 WHEN "1100" =>
+             seg_digit <= "0110001"; 
+       	 WHEN "1101" =>
+       		 seg_digit <= "1000010"; 
+      	 WHEN "1110" =>
+      	     seg_digit <= "0110000"; 
+      	 WHEN "1111" =>
+      	     seg_digit <= "0111000"; 
+	   	 WHEN OTHERS =>
+        	 seg_digit <= "1000001";
+	  END CASE;
+	END PROCESS;
+	
+	
+
+END a;
+
+-- Controlador VGA
+
+library IEEE;
+use  IEEE.STD_LOGIC_1164.all;
+use  IEEE.STD_LOGIC_ARITH.all;
+use  IEEE.STD_LOGIC_UNSIGNED.all;
+
+ENTITY controlador_vga_640_x_480_60 IS
+	PORT(	
+			clock_25		: 	IN	STD_LOGIC;
+			r,g,b	: 	IN	STD_LOGIC;
+			vga_r			:	OUT	STD_LOGIC;
+			vga_g		:	OUT	STD_LOGIC;
+			vga_b		:	OUT	STD_LOGIC;
+			vga_blank_N	:	OUT	STD_LOGIC;
+			vga_hs			:	OUT STD_LOGIC;
+			vga_vs			:	OUT STD_LOGIC;
+			vga_clk			:	OUT STD_LOGIC;
+			pixel_y			:	OUT STD_LOGIC_VECTOR(9 DOWNTO 0);
+			pixel_x			:	OUT	STD_LOGIC_VECTOR(9 DOWNTO 0)
+	);		
+			
+END controlador_vga_640_x_480_60;
+
+ARCHITECTURE  rtl OF controlador_vga_640_x_480_60 IS
+
+-- Especificacione temporales VGA 640 x 480 pixels (60 Hz), 25M pixels/s
+-- Sincronización horizontal (en número de pixels/línea)
+  CONSTANT h_a: integer := 96; -- Retorno horizontal
+  CONSTANT h_b: integer := 48; -- "Back porch" horizontal (Margen izquierdo)
+  CONSTANT h_c: integer := 640; -- Área de visualización horizontal 
+  CONSTANT h_d: integer := 16; -- "Front porch" horizontal (Margen derecho)  
+  CONSTANT h_total : integer := h_a + h_b + h_c + h_d;  
+   
+-- Sincronización Vertical (en número de líneas/pantalla)  
+  CONSTANT v_a: integer := 2; -- Retorno vertical
+  CONSTANT v_b: integer := 33; -- "Back porch" vertical
+  CONSTANT v_c: integer := 480; -- Área de visualización vertical 
+  CONSTANT v_d: integer := 10; -- "Front porch" vertical 
+  CONSTANT v_total : integer := v_a + v_b + v_c + v_d;  
+ 
+    
+	SIGNAL hs, vs : STD_LOGIC;
+	SIGNAL video_on : STD_LOGIC;
+	SIGNAL cont_hs, cont_vs :STD_LOGIC_VECTOR(9 DOWNTO 0);
+
+BEGIN
+
+
+
+-- La se al vga_clk que va al DAC coincide con el reloj de 25MHz. 
+vga_clk <= clock_25;
+
+
+
+PROCESS
+BEGIN
+	WAIT UNTIL(clock_25'EVENT) AND (clock_25='1');
+
+
+-- Se generan las señales de sinronizacion horizontal y vertical
+-- a partir de los contadores cont_hs y cont_vs
+
+-- El contador cont_hs cuenta los pixels/fila
+-- La señal de sincronización horizontal (hs) vale cero durante el retorno horizontal 
+
+--
+	IF (cont_hs = h_total - 1) THEN
+   		cont_hs <= "0000000000";
+	ELSE
+   		cont_hs <= cont_hs + 1;
+	END IF;
+
+IF (cont_hs <= h_c+h_d+h_a-1) AND (cont_hs >= h_c+h_d) THEN
+ 	  	hs <= '0';
+	ELSE
+ 	  	hs <= '1';
+	END IF;
+
+-- El contador cont_vs cuenta las filas/pantalla
+-- La señal de sincronización vertical (vs) vale cero durante el retorno vertical
+
+	IF (cont_vs = v_total - 1) AND (cont_hs >= h_total - h_a - h_d) THEN
+   		cont_vs <= "0000000000";
+	ELSIF (cont_hs = h_total - h_a - h_d) THEN
+   		cont_vs <= cont_vs + 1;
+	END IF;
+
+	IF (cont_vs <= v_c+v_d+v_a-1) AND (cont_vs >= v_c+v_d) THEN
+   		vs <= '0';
+	ELSE
+  		 vs <= '1';
+	END IF;
+
+
+-- Se generan señales para informar a la salida de la coordenada de pixel a visualizar
+	IF (cont_hs <= 639) THEN pixel_x <= cont_hs;	END IF;
+	IF (cont_vs <= 479) THEN pixel_y <= cont_vs; end if; 
+	
+	-- La señal video_on está en alta cuando se transmite información de video
+  -- (para valores de cont_vs entre 0 y 479, y valores de cont_hs entre 0 y 639)
+ 
+  if (cont_hs <= 639) and (cont_vs <= 479) then video_on <= '1'; else video_on <= '0'; end if;
+
+-- Se registran todas las señales de video para eliminar retardos que puedan emborronar la imagen
+		vga_r <= r AND video_on;
+		vga_g <= g AND video_on;
+		vga_b <= b AND video_on;
+		vga_hs 	<= hs;
+		vga_vs 	<= vs;
+		vga_blank_n <= video_on;
+
+
+
+END PROCESS;
+
+END rtl;
